@@ -234,6 +234,30 @@ export const queryList = [
             res += `\n- Cooldown (ms): ${status.cooldown_ms}`;
             res += `\n- Primary Goal: ${status.primary_goal || 'none'}`;
             res += `\n- Active Subgoal: ${status.active_subgoal || 'none'}`;
+            res += `\n- AGI Mode: ${status.agi_mode}`;
+            res += `\n- AGI Current Milestone: ${status.agi_current_milestone || 'none'}`;
+            return pad(res);
+        }
+    },
+    {
+        name: "!agiStatus",
+        description: "Get current AGI planner objective and milestone queue.",
+        perform: function (agent) {
+            const status = agent.self_prompter.getStatus();
+            let res = 'AGI_STATUS';
+            res += `\n- Enabled: ${status.agi_mode}`;
+            res += `\n- Objective: ${status.agi_objective || status.primary_goal || 'none'}`;
+            res += `\n- Current Milestone: ${status.agi_current_milestone || 'none'}`;
+
+            const remaining = Array.isArray(status.agi_remaining_milestones) ? status.agi_remaining_milestones : [];
+            if (remaining.length > 0) {
+                res += '\n- Remaining Milestones:';
+                for (const milestone of remaining.slice(0, 6)) {
+                    res += `\n  - ${milestone}`;
+                }
+            } else {
+                res += '\n- Remaining Milestones: none';
+            }
             return pad(res);
         }
     },

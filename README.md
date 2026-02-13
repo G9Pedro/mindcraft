@@ -46,7 +46,10 @@ Mindcraft now supports a durable long-horizon goal loop for survival play:
 
 - `!goal("...")`: run continuous self-prompting for a fixed goal.
 - `!infiniteGoal("...")`: run endless progression with rotating subgoals (food, tools, base, exploration, trading, nether prep, etc.).
+- `!enableAGI("...")`: enable milestone-planned AGI mode for continuous progression.
+- `!disableAGI`: stop AGI planner/self-prompt loop.
 - `!autonomyStatus`: inspect autonomy state, current subgoal, and watchdog counters.
+- `!agiStatus`: inspect AGI objective and upcoming milestone queue.
 
 By default, `settings.js` includes an `autonomy` block. If no task is set, the bot can auto-start infinite progression (`autonomy.auto_start_infinite_goal`).
 

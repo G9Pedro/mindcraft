@@ -1,33 +1,10 @@
 import * as world from './library/world.js';
 import settings from './settings.js';
+import { AGIPlanner } from './agi/agi_planner.js';
 
 const STOPPED = 0;
 const ACTIVE = 1;
 const PAUSED = 2;
-
-const FOOD_ITEM_NAMES = [
-    'apple',
-    'baked_potato',
-    'beetroot_soup',
-    'bread',
-    'cake',
-    'carrot',
-    'cooked_beef',
-    'cooked_chicken',
-    'cooked_cod',
-    'cooked_mutton',
-    'cooked_porkchop',
-    'cooked_rabbit',
-    'cooked_salmon',
-    'dried_kelp',
-    'golden_carrot',
-    'melon_slice',
-    'mushroom_stew',
-    'potato',
-    'pumpkin_pie',
-    'rabbit_stew',
-    'suspicious_stew'
-];
 
 const DEFAULT_INFINITE_GOAL_POOL = [
     'Build and organize a safe base with storage, furnaces, and a bed.',
@@ -48,6 +25,9 @@ const DEFAULT_AUTONOMY_CONFIG = Object.freeze({
     rotate_subgoal_every_ms: 180000,
     inject_stats_every_ms: 45000,
     checkpoint_every_cycles: 12,
+    enable_agi_by_default: true,
+    agi_replan_interval_ms: 120000,
+    agi_max_stagnation_cycles: 5,
     auto_start_infinite_goal: true,
     default_infinite_goal: 'Survive, improve gear, and progress forever with no final endpoint.',
     infinite_goal_pool: DEFAULT_INFINITE_GOAL_POOL
@@ -61,32 +41,6 @@ function normalizeGoal(text, fallback = '') {
         return fallback.trim();
     }
     return '';
-}
-
-function getItemCount(inventory, names) {
-    let total = 0;
-    for (const name of names) {
-        total += inventory[name] || 0;
-    }
-    return total;
-}
-
-function getMatchingCount(inventory, predicate) {
-    let total = 0;
-    for (const [name, count] of Object.entries(inventory)) {
-        if (predicate(name)) {
-            total += count;
-        }
-    }
-    return total;
-}
-
-function hasAnyItem(inventory, names) {
-    return names.some((name) => (inventory[name] || 0) > 0);
-}
-
-function getFoodCount(inventory) {
-    return getItemCount(inventory, FOOD_ITEM_NAMES);
 }
 
 function toSafeInteger(value, fallback, min = 0) {
@@ -139,6 +93,9 @@ function normalizeAutonomyConfig(rawConfig) {
     merged.rotate_subgoal_every_ms = toSafeInteger(merged.rotate_subgoal_every_ms, DEFAULT_AUTONOMY_CONFIG.rotate_subgoal_every_ms, 10000);
     merged.inject_stats_every_ms = toSafeInteger(merged.inject_stats_every_ms, DEFAULT_AUTONOMY_CONFIG.inject_stats_every_ms, 5000);
     merged.checkpoint_every_cycles = toSafeInteger(merged.checkpoint_every_cycles, DEFAULT_AUTONOMY_CONFIG.checkpoint_every_cycles, 1);
+    merged.enable_agi_by_default = toSafeBool(merged.enable_agi_by_default, DEFAULT_AUTONOMY_CONFIG.enable_agi_by_default);
+    merged.agi_replan_interval_ms = toSafeInteger(merged.agi_replan_interval_ms, DEFAULT_AUTONOMY_CONFIG.agi_replan_interval_ms, 10000);
+    merged.agi_max_stagnation_cycles = toSafeInteger(merged.agi_max_stagnation_cycles, DEFAULT_AUTONOMY_CONFIG.agi_max_stagnation_cycles, 1);
     merged.auto_start_infinite_goal = toSafeBool(merged.auto_start_infinite_goal, DEFAULT_AUTONOMY_CONFIG.auto_start_infinite_goal);
     merged.default_infinite_goal = normalizeGoal(merged.default_infinite_goal, DEFAULT_AUTONOMY_CONFIG.default_infinite_goal);
     if (!Array.isArray(merged.infinite_goal_pool) || merged.infinite_goal_pool.length === 0) {
@@ -158,6 +115,10 @@ export class SelfPrompter {
     constructor(agent) {
         this.agent = agent;
         this.config = normalizeAutonomyConfig(settings.autonomy);
+        this.agi_planner = new AGIPlanner({
+            replan_interval_ms: this.config.agi_replan_interval_ms,
+            max_stagnation_cycles: this.config.agi_max_stagnation_cycles
+        });
 
         this.state = STOPPED;
         this.loop_active = false;
@@ -169,43 +130,53 @@ export class SelfPrompter {
         this.primary_goal = '';
         this.active_subgoal = '';
         this.infinite_mode = false;
+        this.agi_mode = false;
 
         this.loop_count = 0;
         this.no_command_count = 0;
         this.stalled_cycles = 0;
-        this.goal_pool_index = 0;
-        this.last_goal_rotation = 0;
         this.last_stats_injection = 0;
         this.last_snapshot_signature = null;
     }
 
     start(prompt = null) {
         console.log('Self-prompting started.');
+        if ((prompt === null || prompt === undefined) && this.infinite_mode) {
+            return this.startInfinite(this.primary_goal || this.prompt, this.agi_mode);
+        }
         const resolvedPrompt = normalizeGoal(prompt, this.primary_goal || this.prompt);
         if (!resolvedPrompt) {
             return 'No prompt specified. Ignoring request.';
         }
-        if (prompt !== null && prompt !== undefined) {
-            this.infinite_mode = false;
-        }
+        this.infinite_mode = false;
+        this.agi_mode = false;
+        this.agi_planner.stop();
         this.state = ACTIVE;
         this.primary_goal = resolvedPrompt;
         this.prompt = resolvedPrompt;
+        this.active_subgoal = '';
         this.startLoop();
         return null;
     }
 
-    startInfinite(primaryGoal = null) {
+    startInfinite(primaryGoal = null, agiMode = this.config.enable_agi_by_default, preservePlanner = false) {
         const resolvedGoal = normalizeGoal(primaryGoal, this.primary_goal || this.config.default_infinite_goal);
         if (!resolvedGoal) {
             return 'No infinite goal specified. Ignoring request.';
         }
         this.state = ACTIVE;
         this.infinite_mode = true;
+        this.agi_mode = !!agiMode;
         this.primary_goal = resolvedGoal;
         this.prompt = resolvedGoal;
         this.active_subgoal = '';
-        this.last_goal_rotation = 0;
+        if (this.agi_mode) {
+            if (!preservePlanner || !this.agi_planner.isEnabled() || this.agi_planner.getStatus().objective !== this.primary_goal) {
+                this.agi_planner.start(this.primary_goal, this.config.infinite_goal_pool, this._captureSnapshot());
+            }
+        } else {
+            this.agi_planner.stop();
+        }
         this.startLoop();
         return null;
     }
@@ -229,28 +200,36 @@ export class SelfPrompter {
     getPersistentState() {
         return {
             infinite_mode: this.infinite_mode,
+            agi_mode: this.agi_mode,
             primary_goal: this.primary_goal,
             active_subgoal: this.active_subgoal,
-            goal_pool_index: this.goal_pool_index,
             loop_count: this.loop_count,
             no_command_count: this.no_command_count,
-            stalled_cycles: this.stalled_cycles
+            stalled_cycles: this.stalled_cycles,
+            agi_planner: this.agi_planner.exportState()
         };
     }
 
     getStatus() {
+        const agiStatus = this.agi_planner.getStatus();
         return {
             state: this.state,
             state_name: this.state === ACTIVE ? 'ACTIVE' : (this.state === PAUSED ? 'PAUSED' : 'STOPPED'),
             loop_active: this.loop_active,
             infinite_mode: this.infinite_mode,
+            agi_mode: this.agi_mode,
             goal: this.prompt,
             primary_goal: this.primary_goal,
             active_subgoal: this.active_subgoal,
             loop_count: this.loop_count,
             no_command_count: this.no_command_count,
             stalled_cycles: this.stalled_cycles,
-            cooldown_ms: this.cooldown
+            cooldown_ms: this.cooldown,
+            agi_objective: agiStatus.objective,
+            agi_current_milestone: agiStatus.current_milestone,
+            agi_remaining_milestones: agiStatus.remaining_milestones,
+            agi_recent_completed: agiStatus.completed_recent,
+            agi_recent_failed: agiStatus.failed_recent
         };
     }
 
@@ -264,12 +243,13 @@ export class SelfPrompter {
 
         if (persistentState && typeof persistentState === 'object') {
             this.infinite_mode = toSafeBool(persistentState.infinite_mode, this.infinite_mode);
+            this.agi_mode = toSafeBool(persistentState.agi_mode, this.agi_mode);
             this.primary_goal = normalizeGoal(persistentState.primary_goal, this.primary_goal);
             this.active_subgoal = normalizeGoal(persistentState.active_subgoal, '');
-            this.goal_pool_index = toSafeInteger(persistentState.goal_pool_index, this.goal_pool_index, 0);
             this.loop_count = toSafeInteger(persistentState.loop_count, this.loop_count, 0);
             this.no_command_count = toSafeInteger(persistentState.no_command_count, this.no_command_count, 0);
             this.stalled_cycles = toSafeInteger(persistentState.stalled_cycles, this.stalled_cycles, 0);
+            this.agi_planner.load(persistentState.agi_planner);
             this.prompt = normalizeGoal(this.prompt, this.primary_goal);
         }
 
@@ -278,14 +258,14 @@ export class SelfPrompter {
         }
         if (state === ACTIVE) {
             if (this.infinite_mode) {
-                await this.startInfinite(this.primary_goal || this.prompt);
+                await this.startInfinite(this.primary_goal || this.prompt, this.agi_mode, true);
             } else {
                 await this.start(this.primary_goal || this.prompt);
             }
         }
     }
 
-    setPromptPaused(prompt, infiniteMode = false) {
+    setPromptPaused(prompt, infiniteMode = false, agiMode = false) {
         const resolvedPrompt = normalizeGoal(prompt, this.primary_goal || this.prompt);
         if (!resolvedPrompt) {
             return;
@@ -294,6 +274,12 @@ export class SelfPrompter {
         this.prompt = resolvedPrompt;
         this.active_subgoal = '';
         this.infinite_mode = !!infiniteMode;
+        this.agi_mode = !!agiMode;
+        if (this.agi_mode && this.infinite_mode) {
+            this.agi_planner.start(this.primary_goal, this.config.infinite_goal_pool, this._captureSnapshot());
+        } else {
+            this.agi_planner.stop();
+        }
         this.state = PAUSED;
     }
 
@@ -389,6 +375,9 @@ export class SelfPrompter {
         await this.stopLoop();
         this.state = STOPPED;
         this.active_subgoal = '';
+        this.infinite_mode = false;
+        this.agi_mode = false;
+        this.agi_planner.stop();
     }
 
     async pause() {
@@ -445,105 +434,25 @@ export class SelfPrompter {
         if (!this.infinite_mode) {
             return normalizeGoal(this.primary_goal, this.prompt);
         }
-
-        const now = Date.now();
-        if (!this.active_subgoal || this._shouldRotateSubgoal(now)) {
-            this.active_subgoal = this._chooseInfiniteSubgoal(snapshot);
-            this.last_goal_rotation = now;
+        if (this.agi_mode) {
+            if (!this.agi_planner.isEnabled()) {
+                this.agi_planner.start(this.primary_goal, this.config.infinite_goal_pool, snapshot);
+            }
+            this.active_subgoal = this.agi_planner.getCurrentDirective(snapshot, this.config.infinite_goal_pool);
+        } else {
+            const pool = this.config.infinite_goal_pool;
+            this.active_subgoal = pool[this.loop_count % pool.length] || 'Continue safe progression.';
         }
-
         return `${this.primary_goal}\nCurrent priority: ${this.active_subgoal}`;
-    }
-
-    _shouldRotateSubgoal(now) {
-        if (now - this.last_goal_rotation >= this.config.rotate_subgoal_every_ms) {
-            return true;
-        }
-        if (this.no_command_count >= Math.max(1, Math.floor(this.config.max_no_command_cycles / 2))) {
-            return true;
-        }
-        if (this.stalled_cycles >= Math.max(1, Math.floor(this.config.max_stalled_cycles / 2))) {
-            return true;
-        }
-        return false;
-    }
-
-    _chooseInfiniteSubgoal(snapshot) {
-        const inventory = snapshot.inventory;
-        const health = snapshot.health;
-        const hunger = snapshot.hunger;
-
-        const logs = getMatchingCount(inventory, (name) => name.endsWith('_log') || name.endsWith('_stem'));
-        const planks = getMatchingCount(inventory, (name) => name.endsWith('_planks'));
-        const wool = getMatchingCount(inventory, (name) => name.endsWith('_wool'));
-        const food = getFoodCount(inventory);
-        const sticks = getItemCount(inventory, ['stick']);
-        const cobble = getItemCount(inventory, ['cobblestone', 'cobbled_deepslate', 'blackstone']);
-        const ironIngots = getItemCount(inventory, ['iron_ingot']);
-        const rawIron = getItemCount(inventory, ['raw_iron']);
-        const coal = getItemCount(inventory, ['coal', 'charcoal']);
-
-        const hasWoodPick = hasAnyItem(inventory, ['wooden_pickaxe']);
-        const hasStonePick = hasAnyItem(inventory, ['stone_pickaxe']);
-        const hasIronPick = hasAnyItem(inventory, ['iron_pickaxe']);
-        const hasShield = hasAnyItem(inventory, ['shield']);
-        const hasCraftingTable = hasAnyItem(inventory, ['crafting_table']);
-        const hasFurnace = hasAnyItem(inventory, ['furnace']);
-        const hasBed = Object.keys(inventory).some((name) => name.endsWith('_bed'));
-
-        if (health <= 10) {
-            return 'Stabilize immediately: get to safety, avoid mobs, and recover health before taking risks.';
-        }
-        if (hunger <= 10 || food < 8) {
-            return 'Secure food now: gather or cook enough food to sustain long exploration and combat.';
-        }
-        if (logs + planks < 12) {
-            return 'Gather wood and convert enough logs to planks for crafting and utility items.';
-        }
-        if (!hasCraftingTable) {
-            return 'Craft a crafting table and keep it available for fast progression.';
-        }
-        if (!hasWoodPick) {
-            return 'Craft a wooden pickaxe to unlock stone progression.';
-        }
-        if (!hasStonePick) {
-            return 'Collect cobblestone and craft a stone pickaxe for reliable mining.';
-        }
-        if (!hasFurnace && cobble < 8) {
-            return 'Collect at least 8 cobblestone and prepare to craft a furnace.';
-        }
-        if (!hasFurnace) {
-            return 'Craft a furnace and prepare fuel for smelting.';
-        }
-        if (!hasIronPick && rawIron + ironIngots < 3) {
-            return 'Mine iron ore and coal so you can smelt ingots and upgrade tools.';
-        }
-        if (!hasIronPick && ironIngots >= 3 && sticks >= 2) {
-            return 'Craft an iron pickaxe to unlock stronger progression paths.';
-        }
-        if (!hasShield && ironIngots >= 1 && planks >= 6) {
-            return 'Craft a shield to improve survivability during long runs.';
-        }
-        if (!hasBed && wool < 3) {
-            return 'Find sheep and collect wool for a bed to control night risk.';
-        }
-        if (!hasBed && wool >= 3 && planks >= 3) {
-            return 'Craft and place a bed so nights are safer and recovery is easier.';
-        }
-        if (rawIron > 0 && coal > 0) {
-            return 'Smelt raw iron and reinvest ingots into armor, tools, and safety upgrades.';
-        }
-
-        const pool = this.config.infinite_goal_pool;
-        const nextGoal = pool[this.goal_pool_index % pool.length];
-        this.goal_pool_index = (this.goal_pool_index + 1) % pool.length;
-        return nextGoal;
     }
 
     _buildLoopPrompt(runtimeGoal, snapshot, forceCommand) {
         const commandRule = forceCommand
             ? 'MANDATORY: your next response must include exactly one command with !commandName syntax.'
             : 'Respond with exactly one command using !commandName syntax.';
+        const plannerRule = this.agi_mode
+            ? '- Treat the current priority as a milestone inside a larger AGI plan. If blocked, gather information and pivot.'
+            : '- Keep making forward progress toward the goal with practical short actions.';
         return `Autonomy cycle #${this.loop_count + 1}.
 Goal:
 ${runtimeGoal}
@@ -553,6 +462,7 @@ Rules:
 - Prefer finite, high-signal actions over endless follow/stay loops.
 - If uncertain, gather information first (!stats, !inventory, !nearbyBlocks, !entities, !craftable).
 - Do not repeat a failing strategy; pivot quickly and continue forward progress.
+${plannerRule}
 Respond now.`;
     }
 
@@ -564,12 +474,22 @@ Respond now.`;
         }
 
         const currentSignature = `${formatPos(snapshot.position)}|${snapshot.health}|${snapshot.hunger}|${snapshot.inventory_signature}`;
+        const progressed = this.last_snapshot_signature !== currentSignature;
         if (this.last_snapshot_signature === currentSignature && this.agent.isIdle()) {
             this.stalled_cycles++;
         } else {
             this.stalled_cycles = 0;
         }
         this.last_snapshot_signature = currentSignature;
+
+        if (this.infinite_mode && this.agi_mode) {
+            this.agi_planner.recordCycle({
+                usedCommand,
+                progressed,
+                snapshot,
+                goalPool: this.config.infinite_goal_pool
+            });
+        }
     }
 
     async _recoverNoCommand() {
@@ -577,9 +497,8 @@ Respond now.`;
         console.warn(warning);
         await this.agent.history.add('system', `${warning} You must issue a command next cycle.`);
         this.no_command_count = 0;
-        if (this.infinite_mode) {
-            this.active_subgoal = this._chooseInfiniteSubgoal(this._captureSnapshot());
-            this.last_goal_rotation = Date.now();
+        if (this.infinite_mode && this.agi_mode) {
+            this.agi_planner.noteFailure('No command used during autonomy cycle.', this._captureSnapshot(), this.config.infinite_goal_pool);
         }
     }
 
@@ -588,6 +507,9 @@ Respond now.`;
         console.warn(warning);
         await this.agent.history.add('system', warning);
         this.stalled_cycles = 0;
+        if (this.infinite_mode && this.agi_mode) {
+            this.agi_planner.noteFailure('No measurable progress detected; forcing recovery.', this._captureSnapshot(), this.config.infinite_goal_pool);
+        }
 
         try {
             if (this.agent.actions.executing) {
@@ -609,7 +531,7 @@ Respond now.`;
 
     async _injectHeartbeat(snapshot) {
         this.last_stats_injection = Date.now();
-        const heartbeat = `[Autonomy heartbeat] loop=${this.loop_count}, pos=${formatPos(snapshot.position)}, health=${snapshot.health}, hunger=${snapshot.hunger}, inventory_total=${snapshot.inventory_total}`;
+        const heartbeat = `[Autonomy heartbeat] loop=${this.loop_count}, pos=${formatPos(snapshot.position)}, health=${snapshot.health}, hunger=${snapshot.hunger}, inventory_total=${snapshot.inventory_total}, subgoal=${this.active_subgoal || 'none'}`;
         await this.agent.history.add('system', heartbeat);
     }
 

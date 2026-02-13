@@ -140,6 +140,9 @@
             "rotate_subgoal_every_ms": 180000,
             "inject_stats_every_ms": 45000,
             "checkpoint_every_cycles": 12,
+            "enable_agi_by_default": true,
+            "agi_replan_interval_ms": 120000,
+            "agi_max_stagnation_cycles": 5,
             "infinite_goal_pool": [
                 "Build and organize a safe base with storage, furnaces, and a bed.",
                 "Upgrade to a full set of iron tools and armor, then stock backups.",

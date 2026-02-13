@@ -68,6 +68,9 @@ const settings = {
         "rotate_subgoal_every_ms": 180000, // rotate infinite subgoal every 3 minutes
         "inject_stats_every_ms": 45000, // periodically inject compact heartbeat context
         "checkpoint_every_cycles": 12, // save memory checkpoints during long runs
+        "enable_agi_by_default": true, // use milestone planner by default for infinite goal mode
+        "agi_replan_interval_ms": 120000, // AGI planner full replan interval
+        "agi_max_stagnation_cycles": 5, // AGI milestone failure threshold before replanning
         "infinite_goal_pool": [
             "Build and organize a safe base with storage, furnaces, and a bed.",
             "Upgrade to a full set of iron tools and armor, then stock backups.",
