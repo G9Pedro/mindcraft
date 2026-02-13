@@ -1,6 +1,5 @@
 import * as world from './library/world.js';
 import settings from './settings.js';
-import { executeCommand } from './commands/index.js';
 
 const STOPPED = 0;
 const ACTIVE = 1;
@@ -594,11 +593,11 @@ Respond now.`;
             if (this.agent.actions.executing) {
                 await this.agent.actions.stop();
             }
-            const moveResult = await executeCommand(this.agent, '!moveAway(8)');
+            const moveResult = await this._executeDirectCommand('!moveAway(8)');
             if (moveResult) {
                 await this.agent.history.add('system', `[Recovery] ${moveResult}`);
             }
-            const nearby = await executeCommand(this.agent, '!nearbyBlocks');
+            const nearby = await this._executeDirectCommand('!nearbyBlocks');
             if (nearby) {
                 await this.agent.history.add('system', `[Recovery] ${nearby}`);
             }
@@ -612,5 +611,10 @@ Respond now.`;
         this.last_stats_injection = Date.now();
         const heartbeat = `[Autonomy heartbeat] loop=${this.loop_count}, pos=${formatPos(snapshot.position)}, health=${snapshot.health}, hunger=${snapshot.hunger}, inventory_total=${snapshot.inventory_total}`;
         await this.agent.history.add('system', heartbeat);
+    }
+
+    async _executeDirectCommand(commandText) {
+        const commands = await import('./commands/index.js');
+        return commands.executeCommand(this.agent, commandText);
     }
 }
