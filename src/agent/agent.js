@@ -101,6 +101,14 @@ export class Agent {
                 await new Promise((resolve) => setTimeout(resolve, 10000));
                 this.checkAllPlayersPresent();
 
+                const shouldAutoStartInfiniteGoal =
+                    !settings.task &&
+                    !save_data?.self_prompt &&
+                    settings.autonomy?.auto_start_infinite_goal;
+                if (shouldAutoStartInfiniteGoal) {
+                    this.self_prompter.startInfinite(settings.autonomy?.default_infinite_goal);
+                }
+
             } catch (error) {
                 console.error('Error in spawn event:', error);
                 process.exit(0);
@@ -162,7 +170,7 @@ export class Agent {
             if (init_message) {
                 this.history.add('system', init_message);
             }
-            await this.self_prompter.handleLoad(save_data.self_prompt, save_data.self_prompting_state);
+            await this.self_prompter.handleLoad(save_data.self_prompt, save_data.self_prompting_state, save_data.self_prompt_meta);
         }
         if (save_data?.last_sender) {
             this.last_sender = save_data.last_sender;

@@ -368,11 +368,52 @@ export const actionsList = [
         },
         perform: async function (agent, prompt) {
             if (convoManager.inConversation()) {
-                agent.self_prompter.setPromptPaused(prompt);
+                agent.self_prompter.setPromptPaused(prompt, false);
             }
             else {
                 agent.self_prompter.start(prompt);
             }
+            return 'Goal mode enabled.';
+        }
+    },
+    {
+        name: '!infiniteGoal',
+        description: 'Enable infinite autonomous progression with rotating long-horizon Minecraft subgoals.',
+        params: {
+            'primary_goal': { type: 'string', description: 'High-level endless goal focus.' },
+        },
+        perform: async function (agent, primary_goal) {
+            if (convoManager.inConversation()) {
+                agent.self_prompter.setPromptPaused(primary_goal, true, true);
+            }
+            else {
+                agent.self_prompter.startInfinite(primary_goal, true);
+            }
+            return 'Infinite goal mode enabled.';
+        }
+    },
+    {
+        name: '!enableAGI',
+        description: 'Enable AGI planner mode for infinite long-horizon Minecraft progression.',
+        params: {
+            'primary_goal': { type: 'string', description: 'High-level AGI objective.' },
+        },
+        perform: async function (agent, primary_goal) {
+            if (convoManager.inConversation()) {
+                agent.self_prompter.setPromptPaused(primary_goal, true, true);
+            }
+            else {
+                agent.self_prompter.startInfinite(primary_goal, true);
+            }
+            return 'Minecraft AGI mode enabled.';
+        }
+    },
+    {
+        name: '!disableAGI',
+        description: 'Disable AGI planner mode and stop self-prompting.',
+        perform: async function (agent) {
+            await agent.self_prompter.stop(false);
+            return 'Minecraft AGI mode disabled.';
         }
     },
     {
