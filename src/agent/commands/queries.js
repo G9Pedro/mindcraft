@@ -220,6 +220,24 @@ export const queryList = [
         }
     },
     {
+        name: "!autonomyStatus",
+        description: "Get the internal status of the long-horizon autonomy loop.",
+        perform: function (agent) {
+            const status = agent.self_prompter.getStatus();
+            let res = 'AUTONOMY_STATUS';
+            res += `\n- State: ${status.state_name}`;
+            res += `\n- Loop Active: ${status.loop_active}`;
+            res += `\n- Infinite Mode: ${status.infinite_mode}`;
+            res += `\n- Loop Count: ${status.loop_count}`;
+            res += `\n- No Command Count: ${status.no_command_count}`;
+            res += `\n- Stalled Cycles: ${status.stalled_cycles}`;
+            res += `\n- Cooldown (ms): ${status.cooldown_ms}`;
+            res += `\n- Primary Goal: ${status.primary_goal || 'none'}`;
+            res += `\n- Active Subgoal: ${status.active_subgoal || 'none'}`;
+            return pad(res);
+        }
+    },
+    {
         name: '!savedPlaces',
         description: 'List all saved locations.',
         perform: async function (agent) {

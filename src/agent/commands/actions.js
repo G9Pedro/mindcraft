@@ -368,11 +368,28 @@ export const actionsList = [
         },
         perform: async function (agent, prompt) {
             if (convoManager.inConversation()) {
-                agent.self_prompter.setPromptPaused(prompt);
+                agent.self_prompter.setPromptPaused(prompt, false);
             }
             else {
                 agent.self_prompter.start(prompt);
             }
+            return 'Goal mode enabled.';
+        }
+    },
+    {
+        name: '!infiniteGoal',
+        description: 'Enable infinite autonomous progression with rotating long-horizon Minecraft subgoals.',
+        params: {
+            'primary_goal': { type: 'string', description: 'High-level endless goal focus.' },
+        },
+        perform: async function (agent, primary_goal) {
+            if (convoManager.inConversation()) {
+                agent.self_prompter.setPromptPaused(primary_goal, true);
+            }
+            else {
+                agent.self_prompter.startInfinite(primary_goal);
+            }
+            return 'Infinite goal mode enabled.';
         }
     },
     {

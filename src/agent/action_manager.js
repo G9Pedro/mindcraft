@@ -91,6 +91,7 @@ export class ActionManager {
 
             // clear bot logs and reset interrupt code
             this.agent.clearBotLogs();
+            this.timedout = false;
 
             this.executing = true;
             this.currentActionLabel = actionLabel;
@@ -129,16 +130,17 @@ export class ActionManager {
             this.currentActionFn = null;
             clearTimeout(TIMEOUT);
             this.cancelResume();
+            const errorStack = err?.stack || 'No stack trace available.';
+            const errorText = err?.toString ? err.toString() : String(err);
             console.error("Code execution triggered catch:", err);
             // Log the full stack trace
-            console.error(err.stack);
+            console.error(errorStack);
             await this.stop();
-            err = err.toString();
 
             let message = this.getBotOutputSummary() +
                 '!!Code threw exception!!\n' +
-                'Error: ' + err + '\n' +
-                'Stack trace:\n' + err.stack+'\n';
+                'Error: ' + errorText + '\n' +
+                'Stack trace:\n' + errorStack + '\n';
 
             let interrupted = this.agent.bot.interrupt_code;
             this.agent.clearBotLogs();

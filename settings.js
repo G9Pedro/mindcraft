@@ -56,6 +56,29 @@ const settings = {
     "block_place_delay": 0, // delay between placing blocks (ms) if using newAction. helps avoid bot being kicked by anti-cheat mechanisms on servers.
   
     "log_all_prompts": false, // log ALL prompts to file
+
+    // long-horizon autonomous goal loop configuration
+    "autonomy": {
+        "auto_start_infinite_goal": true, // auto start endless progression when no task is set and no saved goal is loaded
+        "default_infinite_goal": "Survive, improve gear, and progress forever with no final endpoint.",
+        "cooldown_ms": 2000, // delay between self-prompt cycles
+        "max_commands_per_cycle": 1, // keep one-command control loop for robust long tasks
+        "max_no_command_cycles": 4, // watchdog threshold before forcing a recovery prompt
+        "max_stalled_cycles": 6, // watchdog threshold before forced repositioning recovery
+        "rotate_subgoal_every_ms": 180000, // rotate infinite subgoal every 3 minutes
+        "inject_stats_every_ms": 45000, // periodically inject compact heartbeat context
+        "checkpoint_every_cycles": 12, // save memory checkpoints during long runs
+        "infinite_goal_pool": [
+            "Build and organize a safe base with storage, furnaces, and a bed.",
+            "Upgrade to a full set of iron tools and armor, then stock backups.",
+            "Create a sustainable food pipeline (farm, animals, or fishing).",
+            "Map nearby biomes and collect diverse resource blocks.",
+            "Set up a villager trading route and collect emeralds efficiently.",
+            "Prepare for Nether exploration with spare gear and food.",
+            "Gather enchanting resources and improve combat/survival loadout.",
+            "Automate repetitive gathering tasks and keep inventory tidy."
+        ]
+    }
 }
 
 export default settings;

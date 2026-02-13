@@ -127,6 +127,31 @@
         "description": "Number of minutes to allow code execution. -1 for no timeout",
         "default": -1
     },
+    "autonomy": {
+        "type": "object",
+        "description": "Long-horizon autonomy controls for infinite goal progression and watchdog recovery.",
+        "default": {
+            "auto_start_infinite_goal": true,
+            "default_infinite_goal": "Survive, improve gear, and progress forever with no final endpoint.",
+            "cooldown_ms": 2000,
+            "max_commands_per_cycle": 1,
+            "max_no_command_cycles": 4,
+            "max_stalled_cycles": 6,
+            "rotate_subgoal_every_ms": 180000,
+            "inject_stats_every_ms": 45000,
+            "checkpoint_every_cycles": 12,
+            "infinite_goal_pool": [
+                "Build and organize a safe base with storage, furnaces, and a bed.",
+                "Upgrade to a full set of iron tools and armor, then stock backups.",
+                "Create a sustainable food pipeline (farm, animals, or fishing).",
+                "Map nearby biomes and collect diverse resource blocks.",
+                "Set up a villager trading route and collect emeralds efficiently.",
+                "Prepare for Nether exploration with spare gear and food.",
+                "Gather enchanting resources and improve combat/survival loadout.",
+                "Automate repetitive gathering tasks and keep inventory tidy."
+            ]
+        }
+    },
     "task": {
         "type": "object",
         "description": "The task object to give the agent on start. If null, the agent will not have a task.",
